@@ -1,4 +1,4 @@
-﻿using namespace std;
+using namespace std;
 #include <iostream>
 #include <cmath>
 #include <vector>
@@ -10,6 +10,15 @@ struct Point {
     Point(): x(0), y(0), z(-1) {}//without constructor
     Point(double z) : x(0), y(0), z(z) {} //with only z passed
     Point(double x, double y, double z) : x(x), y(y), z(z) {} //with all passed
+};
+
+struct ScoredPoint { // Score for an optimal point, including both the clearance and trajectory components
+    Point position;
+    double clearanceScore;
+    double trajectoryScore;
+    double totalScore;
+    ScoredPoint() : position(Point()), clearanceScore(0), trajectoryScore(0), totalScore(0) {}
+    ScoredPoint(Point p, double c, double a, double t): position(p), clearanceScore(c), trajectoryScore(a), totalScore(t) {}
 };
 
 class Vector {
@@ -32,6 +41,19 @@ class Vector {
         }
 
         ~Vector() {}
+
+        double average(double p1, double p2) {
+            double avg = (p1 + p2) / 2;
+            return avg;
+        }
+
+        Vector averageVector(Vector v) {
+            //returns average inbetween u and v
+            double xComp = average(xComponent(), v.xComponent());
+            double yComp = average(yComponent(), v.yComponent());
+            double zComp = average(zComponent(), v.zComponent());
+            return Vector(xComp, yComp, zComp);
+        }
 
         double vectorLength() {
             double length = 0;
@@ -175,12 +197,17 @@ class ObjectAvoidance {
         double clearanceWeight = 0.4; //weight for staying closer to points with greater clearance
         double weightIncrement = 0.01;
 
+        double alignmentExpectation = 0.7;
+        double clearanceExpectation = 0.7;
+
     public:
 
         ObjectAvoidance() {
             trajectoryWeight = 0.6;
             clearanceWeight = getProbabilityComplement(trajectoryWeight);
             weightIncrement = 0.01;
+            alignmentExpectation = 0.7;
+            clearanceExpectation = 0.7;
         }
 
         ~ObjectAvoidance() {}
@@ -189,8 +216,13 @@ class ObjectAvoidance {
             return 1.0 - p;
         }
 
-        void setTrajectory(Vector trajectory) {
-            this->trajectory = trajectory;
+        void smoothTrajectory(Vector newTrajectory) {
+            double alpha = 0.3; // smoothing value
+            trajectory = Vector(
+                (1 - alpha) * trajectory.xComponent() + alpha * newTrajectory.xComponent(),
+                (1 - alpha) * trajectory.yComponent() + alpha * newTrajectory.yComponent(),
+                (1 - alpha) * trajectory.zComponent() + alpha * newTrajectory.zComponent()
+            );
         }
 
         Vector getTrajectory() {
@@ -259,37 +291,81 @@ class ObjectAvoidance {
             return 1.0 - deviationScore;
         }
 
-        double scorePoint(Point point, double deviationScore, size_t clearance) {
-
-            double alignment = alignmentScore(deviationScore);
-            double clearanceScore = (double)clearance;
-
-            double weightedScore = trajectoryWeight * alignment + clearanceWeight * clearanceScore;
+        double scorePoint(Point point, double alignmentScore, double clearanceScore) {
+            double weightedScore = trajectoryWeight * alignmentScore + clearanceWeight * clearanceScore;
             return weightedScore;
         }
 
-        Point newOptimalPosition(vector<vector<Point>> emptyPointSet, vector<double> deviationScores) {
+        double clampWeight(double weight) {
+            //This clamps weights between 0 and 1
+            if (weight < 0) return 0.0;
+            if (weight > 1) return 1.0;
+            return weight;
+        }
+
+        double applyIncrement(double weight, bool success) {
+            if (success) {
+                weight += weightIncrement;
+            }
+            else {
+                weight -= weightIncrement;
+            }
+            return clampWeight(weight);
+        }
+
+        void normaliseWeights() {
+            //Normalise between zero and 1
+            double total = trajectoryWeight + clearanceWeight;
+            if (total > 0.0) {
+                trajectoryWeight /= total;
+                clearanceWeight /= total;
+            }
+            else {
+                // fallback: 60/40 split if both collapsed to 0
+                trajectoryWeight = 0.6;
+                clearanceWeight = 0.4;
+            }
+        }
+
+        void updateWeights(bool successClearance, bool successTraj) {
+            // Update trajectory based on trajectory success
+            trajectoryWeight = applyIncrement(trajectoryWeight, successTraj);
+            //Update clearance based on clearance success
+            clearanceWeight = applyIncrement(clearanceWeight, successClearance);
+            //Normalise so they sum to 1
+            normaliseWeights();
+        }
+
+        ScoredPoint newOptimalPosition(vector<vector<Point>> emptyPointSet, vector<double> deviationScores) {
             //This balances decision making between the most empty spaces and lowest deviations from trajectory
             Point optimalPoint;
             double optimalScore = 0;
+            double optimalAlignment = 0;
+            double optimalClearance = 0;
 
             size_t pointSetIdx = 0;
             size_t pointIdx = 0;
             size_t deviationIdx = 0;
             size_t clearance = 0;
+            size_t size = emptyPointSet.size();
             Point point;
 
-            while(pointSetIdx < emptyPointSet.size() && deviationIdx < deviationScores.size()) {
+            while (pointSetIdx <  size && deviationIdx < deviationScores.size()) {
                 vector<Point> pointsArea = emptyPointSet[pointSetIdx];
                 clearance = pointsArea.size(); //score based on distance between candidate point and surrounding empty points
                 //Clearance gives the points in an area
                 pointIdx = 0;
                 while (pointIdx < clearance) {
                     double score = 0;
+                    double clearanceScore = (double)clearance / (double)size;
+                    double alignment = alignmentScore(deviationScores[deviationIdx]);
                     point = pointsArea[pointIdx];
-                    score = scorePoint(point, deviationScores[deviationIdx], clearance);
+
+                    score = scorePoint(point, alignment, clearance);
                     if (score > optimalScore) {
                         optimalScore = score;
+                        optimalAlignment = alignment;
+                        optimalClearance = clearanceScore;
                         optimalPoint = point;
                     }
                     pointIdx++;
@@ -297,7 +373,23 @@ class ObjectAvoidance {
                 deviationIdx++;
 
             }
-            return optimalPoint;
+            ScoredPoint optimisedScoredPoint(optimalPoint, optimalClearance, optimalAlignment, optimalScore);
+            return optimisedScoredPoint;
+        }
+        
+        bool trajectoryFollowed(double trajectoryScore) {
+            return trajectoryScore >= alignmentExpectation;
+        }
+
+        bool adequateClearance(double clearanceScore) {
+            return clearanceScore >= clearanceExpectation;
+        }
+
+        void alterHyperparameters(ScoredPoint optimalScoredPosition) {
+            //This first determines success/failure, and then alters the weights
+            bool successTraj = trajectoryFollowed(optimalScoredPosition.trajectoryScore);
+            bool successClear = adequateClearance(optimalScoredPosition.clearanceScore);
+            updateWeights(successClear, successTraj);
         }
 
         void avoidObstacles(Point points[10][10], Point currentPosition) {
@@ -309,12 +401,12 @@ class ObjectAvoidance {
             */
             vector<vector<Point>> emptyPoints = pointsWithoutObstacles(points);
             vector<double> deviationScores = deviationsFromTrajectory(trajectory, currentPosition, emptyPoints);
-            Point newPosition = newOptimalPosition(emptyPoints, deviationScores);
-            Vector alteredTrajectory = trajectory.vectorOfTwoPoints(currentPosition, newPosition);
+            ScoredPoint optimisedScoredPosition = newOptimalPosition(emptyPoints, deviationScores);
+            Vector alteredTrajectory = trajectory.vectorOfTwoPoints(currentPosition, optimisedScoredPosition.position);
             
-            setTrajectory(alteredTrajectory); //altering trajectory values
+            smoothTrajectory(alteredTrajectory); //altering trajectory values
             //altering decision-making parameters
-
+            alterHyperparameters(optimisedScoredPosition);
         }
 
 };
@@ -333,7 +425,7 @@ class EvasionSystem {
             ObjectAvoidance avoider;
             Vector trajectory(0, 0, 10); //current trajectory in m/s
             Point currentPosition(10, 10, 10); //current position in m
-            avoider.setTrajectory(trajectory);
+            avoider.smoothTrajectory(trajectory);
             avoider.avoidObstacles(points, currentPosition);
             trajectory = avoider.getTrajectory();
         }
