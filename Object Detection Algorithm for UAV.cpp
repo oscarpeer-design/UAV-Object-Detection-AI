@@ -145,28 +145,51 @@ class VideoFrameAnalysis {
 
             int row = 0;
             int col = 0;
+            //initialising background coordinates
+            double xValue = -100;
+            double yValue = 100;
+            double xyIncrement = 20;
+
+            while (row < maxRow) {
+                col = 0;
+                xValue = -100;
+                while (col < maxCol) {
+                    if (col < 1 || col > 3) {
+                        points[row][col] = Point(xValue, yValue, -1);
+                    }
+                    col++;
+                    xValue += xyIncrement;
+                }
+                row++;
+                yValue -= xyIncrement;
+            }
+
             //initialising the building
+            xValue = -100;
+            yValue = 100;
             for (col = 1; col < 3; col++) {
 
                 for (row = 0; row < maxRow; row++) {
-                    points[row][col] = Point(buildingFront);
+                    points[row][col] = Point(xValue + col * xyIncrement, yValue - row * xyIncrement, buildingFront);
                 }
 
             }
             col = 3;
+            xValue = -100;
+            yValue = 100;
             for (row = 0; row < maxRow; row++) {
-                points[row][col] = Point(buildingSide);
+                points[row][col] = Point(xValue + col * xyIncrement, yValue - row * xyIncrement, buildingSide);
             }
             //initialising the UAV in the frame
-            points[1][4] = Point(birdVal);
-            points[1][5] = Point(birdVal);
-            points[1][6] = Point(birdVal);
-            points[2][5] = Point(birdVal);
-            points[2][6] = Point(birdVal);
-            points[2][7] = Point(birdVal);
+            points[1][4] = Point(-80,20,birdVal);
+            points[1][5] = Point(-80,0,birdVal);
+            points[1][6] = Point(-80,-20,birdVal);
+            points[2][5] = Point(-60,0,birdVal);
+            points[2][6] = Point(-60,-20,birdVal);
+            points[2][7] = Point(-60,-40,birdVal);
 
         }
-
+        
         void printMatrixDepths() {
             double zCoord = 0;
             for (int row = 0; row < maxRow; row++) {
@@ -174,13 +197,36 @@ class VideoFrameAnalysis {
                     zCoord = points[row][col].z;
                     cout << zCoord <<" ";
                 }
-                cout << "\n";
+                cout << endl;
             }
+        }
+
+        void printMatrix() {
+            cout << "X coordinates:"<<endl;
+            double xCoord = 0;
+            for (int row = 0; row < maxRow; row++) {
+                for (int col = 0; col < maxCol; col++) {
+                    xCoord = points[row][col].x;
+                    cout << xCoord << " ";
+                }
+                cout << endl;
+            }
+            cout << "Y coordinates:"<<endl;
+            double yCoord = 0;
+            for (int row = 0; row < maxRow; row++) {
+                for (int col = 0; col < maxCol; col++) {
+                    yCoord = points[row][col].y;
+                    cout << yCoord << " ";
+                }
+                cout << endl;
+            }
+            cout << "Z coordinates:"<<endl;
+            printMatrixDepths();
         }
 
         void analyseFrame() {
             getTwoObjects(); //This is stub driver
-            printMatrixDepths();
+            printMatrix();
         }
 
 
@@ -418,7 +464,6 @@ class EvasionSystem {
         ~EvasionSystem() {}
 
         void evadeObstacles() {
-            cout << "Detecting\n";
             VideoFrameAnalysis detector;
             detector.analyseFrame();
             Point(*points)[10] = detector.getPoints();
@@ -435,6 +480,5 @@ class EvasionSystem {
 int main() {
     EvasionSystem evasionSystem;
     evasionSystem.evadeObstacles();
-
     return 0;
 }
