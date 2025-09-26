@@ -470,7 +470,6 @@ class EvasionSystem {
             ObjectAvoidance avoider;
             Vector trajectory(0, 0, 10); //current trajectory in m/s
             Point currentPosition(10, 10, 10); //current position in m
-            avoider.smoothTrajectory(trajectory);
             avoider.avoidObstacles(points, currentPosition);
             trajectory = avoider.getTrajectory();
         }
