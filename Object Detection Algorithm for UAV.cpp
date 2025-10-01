@@ -42,6 +42,10 @@ public:
 
     ~Vector() {}
 
+    void printVector() {
+        cout << "<" << x << ", " << y << ", " << z << ">" << endl;
+    }
+
     double average(double p1, double p2) {
         double avg = (p1 + p2) / 2;
         return avg;
@@ -239,8 +243,8 @@ public:
 class ObjectAvoidance {
 private:
     Vector trajectory;
-    double trajectoryWeight = 0.6; //weight for staying on course
-    double clearanceWeight = 0.4; //weight for staying closer to points with greater clearance
+    double trajectoryWeight = 0.5; //weight for staying on course
+    double clearanceWeight = 0.5; //weight for staying closer to points with greater clearance
     double weightIncrement = 0.01;
 
     double alignmentExpectation = 0.7;
@@ -249,7 +253,7 @@ private:
 public:
 
     ObjectAvoidance() {
-        trajectoryWeight = 0.6;
+        trajectoryWeight = 0.5;
         clearanceWeight = getProbabilityComplement(trajectoryWeight);
         weightIncrement = 0.01;
         alignmentExpectation = 0.7;
@@ -257,6 +261,10 @@ public:
     }
 
     ~ObjectAvoidance() {}
+
+    void printWeights() {
+        cout << "trajectory weight: " << trajectoryWeight << ", clearance weight: " << clearanceWeight << endl;
+    }
 
     void setTrajectory(Vector trajectory) {
         this->trajectory = trajectory;
@@ -464,11 +472,14 @@ public:
         detector.analyseFrame();
         Point(*points)[10] = detector.getPoints();
         ObjectAvoidance avoider;
-        Vector trajectory(0, 0, -1); //current trajectory in m/s
-        Point currentPosition(10, 10, 0); //current position in m
+        Vector trajectory(-60, 60, 0); //current trajectory in m/s
+        trajectory.printVector();
+        Point currentPosition(-60, 60, 0); //current position in m
         avoider.setTrajectory(trajectory);
         avoider.avoidObstacles(points, currentPosition);
         trajectory = avoider.getTrajectory();
+        avoider.printWeights();
+        trajectory.printVector();
     }
 
 };
