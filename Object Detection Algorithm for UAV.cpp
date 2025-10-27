@@ -3,6 +3,11 @@ using namespace std;
 #include <cmath>
 #include <vector>
 
+#include <cstdlib> //for random number generation
+#include <ctime> //for time 
+#include <random> //for modern random number generation
+
+
 struct Point {
     double x;
     double y;
@@ -116,6 +121,20 @@ public:
         return score;
     }
 
+    Point applyVectorToPoint(Point p, Vector v) {
+        double xComp = p.x + v.x;
+        double yComp = p.y + v.y;
+        double zComp = p.z + v.z;
+        return Point(xComp, yComp, zComp);
+    }
+
+    Point applyCurrentVectorToPoint(Point p) {
+        double xComp = p.x + x;
+        double yComp = p.y + y;
+        double zComp = p.z + z;
+        return Point(xComp, yComp, zComp);
+    }
+
     double xComponent() {
         return x;
     }
@@ -135,6 +154,7 @@ private:
     int maxRow = 10;
     int maxCol = 10;
     Point points[10][10];
+    mt19937 rng; // Modern RNG for better randomness and to avoid reseeding each call
 
 public:
     VideoFrameAnalysis() {
@@ -142,6 +162,27 @@ public:
     }
 
     ~VideoFrameAnalysis() {}
+
+    void setBackgroundCoordinates() {
+        //This sets default x,y,z coordinates (no obstacles)
+        int row = 0;
+        int col = 0;
+        double yValue = 100;
+        double xyIncrement = 20;
+        double xValue = -100;
+
+        while (row < maxRow) {
+            col = 0;
+            xValue = -100;
+            while (col < maxCol) {
+                points[row][col] = Point(xValue, yValue, -1);
+                col ++;
+                xValue += xyIncrement;
+            }
+            row++;
+            yValue -= xyIncrement;
+        }
+    }
 
     //This is stub
     void getTwoObjects() {
@@ -228,9 +269,75 @@ public:
         printMatrixDepths();
     }
 
-    void analyseFrame() {
-        getTwoObjects(); //This is stub driver
+    //this is a testing stub method to test the algorithm
+    void randomizeObstacles() {
+        // Use seeded mt19937 RNG (seeded in ctor) instead of calling srand(time(0)) here.
+        setBackgroundCoordinates();
+
+        // parameters you can tune
+        const double clusterProbability = 0.35; // chance that a placement creates a small cluster
+        const int maxDepth = 10;
+        const int minDepth = 1;
+        const int maxObstacles = (maxRow * maxCol) / 2; // up to half filled by obstacles by default
+
+        uniform_int_distribution<int> countDist(0, maxObstacles);
+        uniform_int_distribution<int> rowDist(0, maxRow - 1);
+        uniform_int_distribution<int> colDist(0, maxCol - 1);
+        uniform_int_distribution<int> depthDist(minDepth, maxDepth);
+        uniform_real_distribution<double> probDist(0.0, 1.0);
+        uniform_int_distribution<int> clusterRadiusDist(1, 2); // small clusters radius
+
+        int numObstaclePoints = countDist(rng);
+
+        // Track which cells are already set as obstacles to avoid duplicate placements
+        vector<char> occupied(maxRow * maxCol, 0);
+
+        int placed = 0;
+        while (placed < numObstaclePoints) {
+            int r = rowDist(rng);
+            int c = colDist(rng);
+
+            if (occupied[r * maxCol + c]) {
+                // already an obstacle placed here, try another cell
+                continue;
+            }
+
+            // decide cluster or single
+            if (probDist(rng) < clusterProbability) {
+                int radius = clusterRadiusDist(rng);
+                // place a small cluster around (r,c)
+                for (int dr = -radius; dr <= radius && placed < numObstaclePoints; ++dr) {
+                    for (int dc = -radius; dc <= radius && placed < numObstaclePoints; ++dc) {
+                        int rr = r + dr;
+                        int cc = c + dc;
+                        if (rr >= 0 && rr < maxRow && cc >= 0 && cc < maxCol) {
+                            int idx = rr * maxCol + cc;
+                            if (!occupied[idx]) {
+                                int depth = depthDist(rng);
+                                points[rr][cc] = Point(points[rr][cc].x, points[rr][cc].y, depth);
+                                occupied[idx] = 1;
+                                placed++;
+                            }
+                        }
+                    }
+                }
+            }
+            else {
+                int depth = depthDist(rng);
+                points[r][c] = Point(points[r][c].x, points[r][c].y, depth);
+                occupied[r * maxCol + c] = 1;
+                placed++;
+            }
+        }
+    }
+
+    void createTestingPoints() {
+        randomizeObstacles(); //This is stub driver
         printMatrix();
+    }
+
+    void analyseFrame() {
+        
     }
 
 
@@ -467,6 +574,29 @@ public:
 
     ~EvasionSystem() {}
 
+    void  testEvasionObstacles() {
+        VideoFrameAnalysis detector;
+        ObjectAvoidance avoider;
+        Vector trajectory(-60, 60, 0); //current trajectory in m/s
+        
+        Point currentPosition(-60, 60, 0); //current position in m
+
+        for (int i = 0; i < 5; i++) {
+            cout << "Current position: (" << currentPosition.x << ", " << currentPosition.y << ", " << currentPosition.z << ")" << endl;
+
+            detector.createTestingPoints();
+            Point(*points)[10] = detector.getPoints();
+            trajectory.printVector();
+            avoider.setTrajectory(trajectory);
+            avoider.avoidObstacles(points, currentPosition);
+            trajectory = avoider.getTrajectory();
+            avoider.printWeights();
+            trajectory.printVector();
+
+            currentPosition = trajectory.applyCurrentVectorToPoint(currentPosition);
+        }
+    }
+
     void evadeObstacles() {
         VideoFrameAnalysis detector;
         detector.analyseFrame();
@@ -474,7 +604,7 @@ public:
         ObjectAvoidance avoider;
         Vector trajectory(-60, 60, 0); //current trajectory in m/s
         trajectory.printVector();
-        Point currentPosition(-60, 60, 0); //current position in m
+        Point currentPosition(-60,60,0); //current position in m
         avoider.setTrajectory(trajectory);
         avoider.avoidObstacles(points, currentPosition);
         trajectory = avoider.getTrajectory();
@@ -486,6 +616,6 @@ public:
 
 int main() {
     EvasionSystem evasionSystem;
-    evasionSystem.evadeObstacles();
+    evasionSystem.testEvasionObstacles();
     return 0;
 }
