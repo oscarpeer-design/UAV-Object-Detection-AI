@@ -354,6 +354,8 @@ private:
     double clearanceWeight = 0.5; //weight for staying closer to points with greater clearance
     double weightIncrement = 0.01;
 
+    double overallScore = 0.0;
+
     double alignmentExpectation = 0.7;
     double clearanceExpectation = 0.7;
 
@@ -365,12 +367,17 @@ public:
         weightIncrement = 0.01;
         alignmentExpectation = 0.7;
         clearanceExpectation = 0.7;
+        overallScore = 0.0;
     }
 
     ~ObjectAvoidance() {}
 
     void printWeights() {
         cout << "trajectory weight: " << trajectoryWeight << ", clearance weight: " << clearanceWeight << endl;
+    }
+
+    void printOverallScore() {
+        cout << "overall score: " << overallScore << endl;
     }
 
     void setTrajectory(Vector trajectory) {
@@ -392,6 +399,10 @@ public:
 
     Vector getTrajectory() {
         return trajectory;
+    }
+
+    double getOverallScore() {
+        return overallScore;
     }
 
     vector<vector<Point>> pointsWithoutObstacles(Point points[10][10]) {
@@ -542,11 +553,19 @@ public:
         return clearanceScore >= clearanceExpectation;
     }
 
+    void calculateOverallScore(double trajectoryScore, double clearanceScore) {
+        overallScore = trajectoryWeight * trajectoryScore + clearanceWeight * clearanceScore;
+    }
+
     void alterHyperparameters(ScoredPoint optimalScoredPosition) {
         //This first determines success/failure, and then alters the weights
-        bool successTraj = trajectoryFollowed(optimalScoredPosition.trajectoryScore);
-        bool successClear = adequateClearance(optimalScoredPosition.clearanceScore);
+        double traj = optimalScoredPosition.trajectoryScore;
+        double clearance = optimalScoredPosition.clearanceScore;
+
+        bool successTraj = trajectoryFollowed(traj);
+        bool successClear = adequateClearance(clearance);
         updateWeights(successClear, successTraj);
+        calculateOverallScore(traj, clearance);
     }
 
     void avoidObstacles(Point points[10][10], Point currentPosition) {
@@ -581,7 +600,7 @@ public:
         
         Point currentPosition(-60, 60, 0); //current position in m
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 10; i++) {
             cout << "Current position: (" << currentPosition.x << ", " << currentPosition.y << ", " << currentPosition.z << ")" << endl;
 
             detector.createTestingPoints();
@@ -591,6 +610,7 @@ public:
             avoider.avoidObstacles(points, currentPosition);
             trajectory = avoider.getTrajectory();
             avoider.printWeights();
+            avoider.printOverallScore();
             trajectory.printVector();
 
             currentPosition = trajectory.applyCurrentVectorToPoint(currentPosition);
@@ -609,6 +629,7 @@ public:
         avoider.avoidObstacles(points, currentPosition);
         trajectory = avoider.getTrajectory();
         avoider.printWeights();
+        avoider.printOverallScore();
         trajectory.printVector();
     }
 
