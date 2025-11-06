@@ -596,9 +596,9 @@ public:
     void  testEvasionObstacles() {
         VideoFrameAnalysis detector;
         ObjectAvoidance avoider;
-        Vector trajectory(-60, 60, 0); //current trajectory in m/s
+        Vector trajectory(0, 0, 0); //current trajectory in m/s
         
-        Point currentPosition(-60, 60, 0); //current position in m
+        Point currentPosition(0, 0, 0); //current position in m
 
         for (int i = 0; i < 10; i++) {
             cout << "Current position: (" << currentPosition.x << ", " << currentPosition.y << ", " << currentPosition.z << ")" << endl;
