@@ -19,20 +19,19 @@ class VideoFrameAnalyser():
     def get_screen_height(self):
         return self.screen_height
 
-class Obstacle():
+class Obstacle:
     def __init__(self, bbox, conf, class_name):
         self.bbox = bbox
-        self.conf = conf 
-        self.class_name = class_name 
+        self.conf = conf
+        self.class_name = class_name
 
-        self.width = bbox[2] - bbox[0]
-        self.height = bbox[3] - bbox[1]
-
+    @property
     def width(self):
-        return self.width 
+        return self.bbox[2] - self.bbox[0]
 
+    @property
     def height(self):
-        return self.height 
+        return self.bbox[3] - self.bbox[1] 
 
     def centre(self):
         cx = (self.bbox[0] + self.bbox[2]) // 2
@@ -50,25 +49,17 @@ class Obstacle():
         w = frame_width / 2
         return (cx - w) / w
 
-    def bottom_left(self):
-        x = self.bbox[0]
-        y = self.bbox[1] - self.height 
-        return (x, y)
-
     def top_left(self):
-        x = self.bbox[0]
-        y = self.bbox[1] 
-        return (x, y)
+        return (self.bbox[0], self.bbox[1])
+
+    def bottom_left(self):
+        return (self.bbox[0], self.bbox[3])
 
     def top_right(self):
-        x = self.bbox[2] 
-        y = self.bbox[3]
-        return (x, y)
+        return (self.bbox[2], self.bbox[1])
 
     def bottom_right(self):
-        x = self.bbox[2] 
-        y = self.bbox[3] - self.height 
-        return (x, y)
+        return (self.bbox[2], self.bbox[3])
 
     def bounding_box(self):
         return self.bbox
@@ -93,23 +84,23 @@ class EmptyBox():
         height = self.height()
         return height / frame_height
 
-    def deviation_score(self, trajectory):
-        #This calculates the deviation of one vector from another, between 0 and 1
-        # u.v = |u||v|cos(theta)
-        # Therefore cos(theta) = u.v / (|u||v|)
-        # This is normalised between -1 and 1
-        #-1 means 100%, 0 means 50% deviation, 1 means 0% deviation
-        centre = self.centre()
-        dot_product = centre[0] * trajectory[0] + centre[1] * trajectory[1]
-        len_u = math.sqrt(centre[0] ** 2 + centre[1] ** 2)
-        len_v = math.sqrt(trajectory[0] ** 2 + trajectory[1] ** 2)
+    def deviation_score(self, trajectory, screen_width, screen_height):
+        cx, cy = self.centre()
+        vx = cx - (screen_width) / 2
+        vy = cy - (screen_height) / 2
 
-        costheta = dot_product / (len_u * len_v)
-        #clamp angle between -1 and 1
-        costheta = max(-1, min(1, costheta))
+        dot = vx * trajectory[0] + vy * trajectory[1]
+        len_u = math.sqrt(vx*vx + vy*vy)
+        len_v = math.sqrt(trajectory[0]**2 + trajectory[1]**2)
 
-        deviation_score = (1.0 - costheta) / 2.0 
-        return deviation_score
+        if len_u == 0 or len_v == 0:
+            return 0.0
+
+        cos0 = dot / (len_u * len_v)
+        cos0 = max(-1, min(1, cos0))
+
+        return (1 - cos0) / 2
+
 
 class YOLOObstacleDetector:
     def __init__(self, model_name="yolov8n.pt"):
@@ -131,9 +122,11 @@ class YOLOObstacleDetector:
         return obstacles
 
 class DroneState:
-    def __init__(self, position, velocity):
+    def __init__(self, position, velocity, dt = 0.1):
         self.pos = position
         self.vel = velocity
+        self.dt = dt
+        self.speed = 10
 
     def new_position(self):
         x = self.pos[0] + self.vel[0]
@@ -141,17 +134,52 @@ class DroneState:
         z = self.pos[2] + self.vel[2] 
         return (x, y, z)
 
-    def convert_velocity_2D(self, fov):
-        f = 1 / math.tan(fov / 2)
+    def convert_velocity_2D(self, fov_deg):
+        fov_rad = math.radians(fov_deg)
+        f = 1 / math.tan(fov_rad / 2)
+        if self.vel[2] == 0:
+            return [0, 0]
         x_screen = (self.vel[0] / self.vel[2]) * f
         y_screen = (self.vel[1] / self.vel[2]) * f
         return [x_screen, y_screen]
+
+    def rad(self, deg):
+        return math.radians(deg)
 
     def get_trajectory(self):
         return self.vel
 
     def set_trajectory(self, trajectory):
         self.vel = trajectory
+
+    def update_trajectory(self, new_trajectory):
+        """
+        Update the drone's velocity vector and position based on the new trajectory.
+
+        new_trajectory: 3-element list or tuple representing a direction vector in 3D.
+        """
+
+        # --- 1. Normalise the incoming vector ---
+        nx, ny, nz = new_trajectory
+        mag = math.sqrt(nx*nx + ny*ny + nz*nz)
+
+        # Avoid division by zero
+        if mag == 0:
+            return  # Keep current velocity and do nothing
+
+        nx /= mag
+        ny /= mag
+        nz /= mag
+
+        # --- 2. Update velocity ---
+        # Velocity = direction x speed
+        self.vel = [nx * self.speed, ny * self.speed, nz * self.speed]
+
+        # --- 3. Update position ---
+        # Standard physics: x_new = x_old + v * dt
+        self.pos[0] += self.vel[0] * self.dt
+        self.pos[1] += self.vel[1] * self.dt
+        self.pos[2] += self.vel[2] * self.dt
 
     def alter_z(self, increment):
         self.vel[2] += increment
@@ -165,8 +193,9 @@ class Avoider():
         self.frame_height = frame_height
         self.fov = fov
 
-        self.weight_direction = 0.4
-        self.weight_clearance = self.complement(self.weight_direction)
+        self.weight_alignment = 0.4
+        self.weight_clearance = self.complement(self.weight_alignment)
+        self.learning_rate = 0.02
 
         self.optimal_trajectory = None
 
@@ -174,9 +203,15 @@ class Avoider():
         return 1.0 - p
 
     def convert_point_2D(self, point):
-        f = 1 / math.tan(self.fov / 2)
-        x_screen = (point[0] / point[2]) * f
-        y_screen = (point[1] / point[2]) * f
+        fov_rad = math.radians(self.fov)
+        f = 1 / math.tan(fov_rad / 2)
+
+        X, Y, Z = point[0], point[1], point[2]
+        if Z == 0:
+            Z = 0.0001
+
+        x_screen = (X / Z) * f
+        y_screen = (Y / Z) * f
         return [x_screen, y_screen]
 
     def new_position_2D(self):
@@ -190,39 +225,39 @@ class Avoider():
         return (dist < self.dist_threshold and abs(off) < 0.3)
 
     def convert_vector_to_3D(self, vect, w, h):
-        x_norm = (2 * vect[0]) / w -1
-        y_norm = 1 - (2 * vect[1]) / h
+        x, y = vect
 
-        x_c = x_norm * math.tan(self.fov / 2)
-        y_c = y_norm * math.tan(self.fov / 2)
+        # Normalize to [-1,1]
+        x_norm = (2 * x / w) - 1
+        y_norm = 1 - (2 * y / h)
+
+        fov_rad = math.radians(self.fov)
+        scale = math.tan(fov_rad / 2)
+
+        x_c = x_norm * scale
+        y_c = y_norm * scale
         z_c = 1
 
-        d = math.sqrt(x_c ** 2 + y_c ** 2 + z_c ** 2)
-        x = x_c / d 
-        y = y_c / d 
-        z = z_c / d
-        return [x, y, z]
+        mag = math.sqrt(x_c*x_c + y_c*y_c + z_c*z_c)
+        return [x_c/mag, y_c/mag, z_c/mag]
 
     def get_empty_spaces(self):
         empty_spaces = []
-        start_x = 0
-        start_y = 0
-        for obstacle in self.obstacles:
-            bbox = obstacle.bounding_box()
-            x0 = bbox[0] - start_x 
-            y0 = bbox[1] - start_y 
-            x1 = bbox[2] - start_x 
-            y1 = bbox[3] - start_y 
-            width = x1 - x0 
-            height = y1 - y0 
+        # sort obstacles by x1
+        obstacles_sorted = sorted(self.obstacles, key=lambda o: o.bbox[0])
 
-            if width >= self.dist_threshold and height >= self.dist_threshold:
-                points = (x0, y0, x1, y1) 
-                empty_spaces.append(EmptyBox(points))
+        last_right = 0
 
-            start_x = bbox[2]
-            start_y = bbox[1]
+        for obs in obstacles_sorted:
+            x1, y1, x2, y2 = obs.bbox
+            # empty region between last obstacle and this one
+            if x1 > last_right:
+                empty_spaces.append(EmptyBox((last_right, 0, x1, self.frame_height)))
 
+            last_right = max(last_right, x2)
+        # empty region to the right of the last obstacle
+        if last_right < self.frame_width:
+            empty_spaces.append(EmptyBox((last_right, 0, self.frame_width, self.frame_height)))
         return empty_spaces
 
     def max_distance(self):
@@ -234,8 +269,24 @@ class Avoider():
                 max_dist = dist 
         return max_dist
 
-    def update_hyperparameters(self, best_scored_point):
-        pass 
+    def update_hyperparameters(self, best):
+        print(best)
+        c = best["clearance"]
+        d = best["deviation"]
+
+        # Normalize ratios
+        total = c + d + 1e-6
+        c_ratio = c / total
+        d_ratio = d / total
+
+        # Move weights toward c_ratio/d_ratio
+        self.weight_clearance += self.learning_rate * (c_ratio - self.weight_clearance)
+        self.weight_alignment += self.learning_rate * (d_ratio - self.weight_alignment)
+
+        # Re-normalise
+        s = self.weight_clearance + self.weight_alignment
+        self.weight_clearance /= s
+        self.weight_alignment /= s
 
     def calculate_optimal_trajectory(self):
         point_following_trajectory = self.new_position_2D()
@@ -247,16 +298,17 @@ class Avoider():
         best_scored_point = None
         for space in empty_spaces:
             clearance_score = space.clearance_score(self.frame_height)
-            deviation_score = space.deviation_score(point_following_trajectory)
-            total_score =  deviation_score * self.weight_direction + clearance_score * self.weight_clearance
+            deviation_score = space.deviation_score(point_following_trajectory, self.frame_width, self.frame_height)
+            total_score =  deviation_score * self.weight_alignment + clearance_score * self.weight_clearance
             if total_score > max_total:
                 max_total = total_score
                 best_scored_point = {"clearance": clearance_score, "deviation": deviation_score, "total": total_score, "coordinates": space.centre()}
 
         if best_scored_point is not None:
-            coords = best_scored_point.get("coordinates")
-            new_trajectory = self.convert_vector_to_3D(coords, self.frame_width, self.frame_height)
+            cx, cy = best_scored_point["coordinates"]
+            new_trajectory = self.convert_vector_to_3D((cx, cy), self.frame_width, self.frame_height)
             self.optimal_trajectory = new_trajectory
+            self.update_hyperparameters(best_scored_point)
 
         else:
             if len(self.obstacles) > 0:
@@ -270,8 +322,10 @@ class Avoider():
 
     def set_optimal_trajectory(self):
         if self.optimal_trajectory is not None:
-            self.drone.set_trajectory(self.optimal_trajectory)
+            self.drone.update_trajectory(self.optimal_trajectory)
 
     def optimal_trajectory(self):
         return self.optimal_trajectory
-    
+
+    def print_hyperparameters(self):
+        print(f"clearance weight: {self.weight_clearance}, alignment weight: {self.weight_alignment}, learning rate: {self.learning_rate}")
