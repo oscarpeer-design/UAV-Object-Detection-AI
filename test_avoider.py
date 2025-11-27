@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from UAV_Object_Detection_And_Evasion_Layer import YOLOObstacleDetector, Avoider, Obstacle, DroneState
+from UAV_Object_Detection_And_Evasion_Layer import YOLOObstacleDetector, Avoider, Obstacle, DroneState, VideoFrameAnalyser, Runner
 
 def generate_fake_obstacles():
     return [
@@ -9,7 +9,7 @@ def generate_fake_obstacles():
         Obstacle(bbox=[250, 250, 330, 330], conf=0.80, class_name="object")
     ]
 
-def main():
+def test_blank():
     print("\n=== Running Avoider Test ===\n")
 
     # Create a blank frame for drawing
@@ -56,5 +56,11 @@ def main():
     cv2.imshow("Test Frame", frame)
     cv2.waitKey(0)
 
+def test_obstacle1():
+    print("\n=== Running Avoider Test ===\n")
+    runner = Runner()
+    img_path = "obstacle1.jpg"
+    runner.analyse_optimal_trajectory(img_path)
+
 if __name__ == "__main__":
-    main()
+    test_obstacle1()
