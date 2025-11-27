@@ -1,14 +1,42 @@
 import sys
-import numpy
+import numpy as np
 import math
 from ultralytics import YOLO
 import cv2
 
 class VideoFrameAnalyser():
-    def __init__(self):
-        self.fov = 100 #stub
-        self.screen_height = 200
-        self.screen_width = 200
+    def __init__(self, image_path=None):
+        self.fov = 100
+        self.screen_width = None
+        self.screen_height = None
+
+        if image_path:
+            self.load_and_set_properties(image_path)
+
+    def load_and_set_properties(self, path):
+        img = cv2.imread(path)
+        if img is None:
+            raise FileNotFoundError(f"Could not load image: {path}")
+
+        # Width & Height directly from image
+        self.screen_height, self.screen_width = img.shape[:2]
+
+        return img
+
+    def load_image(self, path):
+        """Load normal BGR image for YOLO."""
+        img = cv2.imread(path)
+        if img is None:
+            raise FileNotFoundError(f"Could not load image: {path}")
+        return img
+
+    def image_greyscale(self, path):
+        """Loads image and converts to grayscale."""
+        img = cv2.imread(path)
+        if img is None:
+            raise FileNotFoundError(f"Could not load image: {path}")
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return gray
 
     def get_fov(self):
         return self.fov
@@ -329,3 +357,39 @@ class Avoider():
 
     def print_hyperparameters(self):
         print(f"clearance weight: {self.weight_clearance}, alignment weight: {self.weight_alignment}, learning rate: {self.learning_rate}")
+
+class Runner():
+    def __init__(self):
+        pass 
+
+    def analyse_optimal_trajectory(self, img_path):
+        """This is a high level method that loads all the components of the system"""
+        #Starting video frame analysis
+        frame_analyser = VideoFrameAnalyser(img_path)
+        #Starting obstacle detection
+        detector = YOLOObstacleDetector()
+        # Starting drone state
+        current_vector_3d = np.array([1.0, 0.2, -0.1])
+        current_position = [0.0, 0.0, 0.0]
+        drone = DroneState(current_position, current_vector_3d)
+        # Screen + camera info
+        screen_width = frame_analyser.get_screen_width()
+        screen_height = frame_analyser.get_screen_height()
+        fov = frame_analyser.get_fov()
+        #getting obstacles
+        frame = frame_analyser.load_image(img_path)
+        obstacles = detector.detect(frame)
+        #Starting evasion system
+        avoider = Avoider(drone, obstacles, screen_width, screen_height, fov)
+        # === Calculate actual optimal trajectory ===
+        avoider.calculate_optimal_trajectory()
+        # Apply new trajectory to the drone
+        avoider.set_optimal_trajectory()
+        # Retrieve the new trajectory
+        new_vector = drone.get_trajectory()
+        print("Original 3D vector:", current_vector_3d)
+        print("Adjusted 3D vector:", new_vector)
+        avoider.print_hyperparameters()
+        # Show debug frame
+        cv2.imshow("Test Frame", frame)
+        cv2.waitKey(0)
