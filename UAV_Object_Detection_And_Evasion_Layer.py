@@ -149,7 +149,43 @@ class YOLOObstacleDetector:
 
         return obstacles
 
-class DroneState:
+class Vector():
+    
+    @staticmethod
+    def project_vector_3d_to_2d(vec3, fov_deg, screen_w, screen_h):
+        # Normalize
+        v = vec3 / np.linalg.norm(vec3)
+        # Unpack vector
+        x, y, z = v
+        # Prevent divide-by-zero (if pointing exactly sideways)
+        if z == 0:
+            z = 1e-6
+        # Compute focal length
+        f = (screen_w / 2) / np.tan(np.radians(fov_deg / 2))
+        # Perspective projection
+        x_proj = (x * f) / z + screen_w / 2
+        y_proj = (y * f) / z + screen_h / 2
+        return [x_proj, y_proj]
+
+    @staticmethod
+    def convert_vector_to_3D(fov, vect, w, h):
+        x, y = vect
+
+        # Normalize to [-1,1]
+        x_norm = (2 * x / w) - 1
+        y_norm = 1 - (2 * y / h)
+
+        fov_rad = math.radians(fov)
+        scale = math.tan(fov_rad / 2)
+
+        x_c = x_norm * scale
+        y_c = y_norm * scale
+        z_c = 1
+
+        mag = math.sqrt(x_c*x_c + y_c*y_c + z_c*z_c)
+        return [x_c/mag, y_c/mag, z_c/mag]
+
+class DroneState():
     def __init__(self, position, velocity, dt = 0.1):
         self.pos = position
         self.vel = velocity
@@ -161,15 +197,6 @@ class DroneState:
         y = self.pos[1] + self.vel[1] 
         z = self.pos[2] + self.vel[2] 
         return (x, y, z)
-
-    def convert_velocity_2D(self, fov_deg):
-        fov_rad = math.radians(fov_deg)
-        f = 1 / math.tan(fov_rad / 2)
-        if self.vel[2] == 0:
-            return [0, 0]
-        x_screen = (self.vel[0] / self.vel[2]) * f
-        y_screen = (self.vel[1] / self.vel[2]) * f
-        return [x_screen, y_screen]
 
     def rad(self, deg):
         return math.radians(deg)
@@ -230,21 +257,9 @@ class Avoider():
     def complement(self, p):
         return 1.0 - p
 
-    def convert_point_2D(self, point):
-        fov_rad = math.radians(self.fov)
-        f = 1 / math.tan(fov_rad / 2)
-
-        X, Y, Z = point[0], point[1], point[2]
-        if Z == 0:
-            Z = 0.0001
-
-        x_screen = (X / Z) * f
-        y_screen = (Y / Z) * f
-        return [x_screen, y_screen]
-
     def new_position_2D(self):
         point = self.drone.new_position()
-        return self.convert_point_2D(point)
+        return Vector.project_vector_3d_to_2d(point, self.fov, self.frame_width, self.frame_height)
 
     def obstacle_in_path(self, obstacle, frame_width, frame_height):
         k = 0.8
@@ -352,7 +367,7 @@ class Avoider():
         if self.optimal_trajectory is not None:
             self.drone.update_trajectory(self.optimal_trajectory)
 
-    def optimal_trajectory(self):
+    def get_optimal_trajectory(self):
         return self.optimal_trajectory
 
     def print_hyperparameters(self):
@@ -362,14 +377,13 @@ class Runner():
     def __init__(self):
         pass 
 
-    def analyse_optimal_trajectory(self, img_path):
+    def analyse_optimal_trajectory(self, img_path, current_vector_3d):
         """This is a high level method that loads all the components of the system"""
         #Starting video frame analysis
         frame_analyser = VideoFrameAnalyser(img_path)
         #Starting obstacle detection
         detector = YOLOObstacleDetector()
         # Starting drone state
-        current_vector_3d = np.array([1.0, 0.2, -0.1])
         current_position = [0.0, 0.0, 0.0]
         drone = DroneState(current_position, current_vector_3d)
         # Screen + camera info
@@ -379,6 +393,13 @@ class Runner():
         #getting obstacles
         frame = frame_analyser.load_image(img_path)
         obstacles = detector.detect(frame)
+        print(f"obstacles detected {len(obstacles)}")
+        # Visualise the obstacles on the frame
+        for obs in obstacles:
+            cv2.rectangle(frame, 
+                      (obs.bbox[0], obs.bbox[1]),
+                      (obs.bbox[2], obs.bbox[3]),
+                      (255, 0, 0), 2)
         #Starting evasion system
         avoider = Avoider(drone, obstacles, screen_width, screen_height, fov)
         # === Calculate actual optimal trajectory ===
@@ -386,10 +407,31 @@ class Runner():
         # Apply new trajectory to the drone
         avoider.set_optimal_trajectory()
         # Retrieve the new trajectory
-        new_vector = drone.get_trajectory()
-        print("Original 3D vector:", current_vector_3d)
-        print("Adjusted 3D vector:", new_vector)
+        new_traj = avoider.get_optimal_trajectory()
+        print("Original 3D trajectory:", current_vector_3d)
+        print("Optimal 3D trajectory:", new_traj)
         avoider.print_hyperparameters()
-        # Show debug frame
+        #show 2d vectors of previous and current trajectories
+        cx = screen_width // 2
+        cy = screen_height // 2
+        # Draw previous vector from screen center
+        prev_traj = Vector.project_vector_3d_to_2d(current_vector_3d, fov, screen_width, screen_height)
+        new_traj = Vector.project_vector_3d_to_2d(new_traj, fov, screen_width, screen_height)
+        print("trajectories projected in 2D:")
+        print(f"prev_traj {prev_traj}, new_traj {new_traj}")
+        # Draw previous vector
+        cv2.line(frame,
+            (cx, cy),
+            (int(prev_traj[0]), int(prev_traj[1])),
+            (0, 0, 0))
+        # Draw new vector
+        cv2.line(frame,
+            (cx, cy),
+            (int(new_traj[0]), int(new_traj[1])),
+            (0, 255, 0))
+        # Show test frame
+        cv2.namedWindow("Test Frame", cv2.WINDOW_NORMAL)
         cv2.imshow("Test Frame", frame)
+        cv2.resizeWindow("Test Frame", 1280, 720)
         cv2.waitKey(0)
+
