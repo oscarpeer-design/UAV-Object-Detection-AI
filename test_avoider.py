@@ -60,7 +60,8 @@ def test_obstacle1():
     print("\n=== Running Avoider Test ===\n")
     runner = Runner()
     img_path = "obstacle1.jpg"
-    runner.analyse_optimal_trajectory(img_path)
+    current_vector_3d = np.array([209, 157, 100])
+    runner.analyse_optimal_trajectory(img_path, current_vector_3d)
 
 if __name__ == "__main__":
     test_obstacle1()
