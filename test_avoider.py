@@ -57,11 +57,27 @@ def test_blank():
     cv2.waitKey(0)
 
 def test_obstacle1():
-    print("\n=== Running Avoider Test ===\n")
+    print("\n=== Running Avoider Test 1 ===\n")
     runner = Runner()
     img_path = "obstacle1.jpg"
     current_vector_3d = np.array([209, 157, 100])
     runner.analyse_optimal_trajectory(img_path, current_vector_3d)
 
+def test_obstacle2():
+    print("\n=== Running Avoider Test 2 ===\n")
+    runner = Runner()
+    img_path = "obstacle2.jpg"
+    current_vector_3d = np.array([1, 26, 202])
+    runner.analyse_optimal_trajectory(img_path, current_vector_3d)
+
+def test_obstacle3():
+    print("\n=== Running Avoider Test 3 ===\n")
+    runner = Runner()
+    img_path = "obstacle3.jpg"
+    current_vector_3d = np.array([1, 120, 67])
+    runner.analyse_optimal_trajectory(img_path, current_vector_3d)
+
 if __name__ == "__main__":
     test_obstacle1()
+    test_obstacle2()
+    test_obstacle3()
