@@ -134,7 +134,51 @@ class YOLOObstacleDetector:
     def __init__(self, model_name="yolov8n.pt"):
         self.model = YOLO(model_name)
 
-    def detect(self, frame):
+    def detect_shapes(self, frame):
+        # Ensure frame is a valid uint8 image
+        threshold = 150
+        min_area = 180
+        frame = np.asarray(frame)
+        if frame is None:
+            raise ValueError("detect_shapes() received None frame")
+        # Convert to grayscale safely
+        if len(frame.shape) == 3:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        elif len(frame.shape) == 2:
+            gray = frame.copy()
+        else:
+            raise ValueError(f"Invalid frame shape: {frame.shape}")
+        # Ensure grayscale is uint8
+        if gray.dtype != np.uint8:
+            gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+            gray = gray.astype(np.uint8)
+        # Blur
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Threshold (invert black shapes → white)
+        ok, thresh = cv2.threshold(
+            blur, threshold, 255, cv2.THRESH_BINARY_INV
+        )
+        if not ok or thresh is None:
+            raise RuntimeError("Thresholding failed – output is None")
+        # Ensure thresh is binary uint8
+        thresh = thresh.astype(np.uint8)
+        # ---- NOW SAFE ----
+        contours, _ = cv2.findContours(
+            thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        obstacles = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area < min_area:
+                continue
+        x, y, w, h = cv2.boundingRect(c)
+
+        obstacles.append(
+            Obstacle([x, y, x + w, y + h], 1.0, "contour-shape")
+        )
+        return obstacles
+
+    def detect_real_world_obstacles(self, frame):
         results = self.model.predict(frame, verbose=False)
 
         obstacles = []
@@ -149,23 +193,27 @@ class YOLOObstacleDetector:
 
         return obstacles
 
+    def detect(self, frame):
+        #Uses detection based on both object recognition and shape recognition
+        shapes = self.detect_shapes(frame)
+        obstacles = self.detect_real_world_obstacles(frame)
+        final_list_obstacles = shapes
+        for obs in obstacles:
+            final_list_obstacles.append(obs)
+        return final_list_obstacles
+
 class Vector():
     
     @staticmethod
-    def project_vector_3d_to_2d(vec3, fov_deg, screen_w, screen_h):
-        # Normalize
-        v = vec3 / np.linalg.norm(vec3)
-        # Unpack vector
-        x, y, z = v
-        # Prevent divide-by-zero (if pointing exactly sideways)
-        if z == 0:
-            z = 1e-6
-        # Compute focal length
-        f = (screen_w / 2) / np.tan(np.radians(fov_deg / 2))
-        # Perspective projection
-        x_proj = (x * f) / z + screen_w / 2
-        y_proj = (y * f) / z + screen_h / 2
-        return [x_proj, y_proj]
+    def project_vector_3d_to_2d(v, fov, w, h):
+        v = v / np.linalg.norm(v)
+        if v[2] <= 0: 
+            v[2] = 1e-3  # prevent blow-up / behind-camera case
+        f = (w/2) / np.tan(np.radians(fov/2))
+
+        x = (v[0] / v[2]) * f + w/2
+        y = (v[1] / v[2]) * f + h/2
+        return [x, y]
 
     @staticmethod
     def convert_vector_to_3D(fov, vect, w, h):
