@@ -3,6 +3,86 @@ import numpy as np
 import math
 from ultralytics import YOLO
 import cv2
+import time
+
+class VideoReader():
+    def __init__(self):
+        self.capture = None
+        self.max_width=1920 
+        self.max_height=1080 
+        self.target_fps=10
+        self.auto_resize=True
+
+        self.frame_width = None 
+        self.frame_height = None 
+        self.video_fps = None
+        self.frame_index = 0
+
+    def load_video(self, video_path):
+        self.capture = cv2.VideoCapture(video_path)
+        if not self.capture.isOpened():
+            raise FileNotFoundError(f"Could not open video: {video_path}")
+
+        # Video properties
+        self.frame_width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.video_fps = self.capture.get(cv2.CAP_PROP_FPS) or 30
+
+        # Resolution check
+        if self.frame_width > self.max_width or self.frame_height > self.max_height:
+            if not self.auto_resize:
+                raise ValueError(
+                    f"Video resolution too large ({self.frame_width}x{self.frame_height}). "
+                    f"Max allowed is {self.max_width}x{self.max_height}")
+
+    def adjust_frame_rate(self):
+        """
+        Adaptive frame skipping to match target FPS.
+        """
+        now = time.time()
+        elapsed = now - self.last_frame_time
+
+        # If processing too fast, wait
+        required_delay = 1.0 / self.target_fps
+
+        if elapsed < required_delay:
+            time.sleep(required_delay - elapsed)
+
+        self.last_frame_time = time.time()
+
+    def _resize_to_max(self, frame):
+        h, w = frame.shape[:2]
+
+        scale = min(self.max_width / w, self.max_height / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+    def read_frame(self):
+        if self.capture is None:
+            raise RuntimeError("Video not loaded. Call load_video() first.")
+
+        self.adjust_frame_rate()
+
+        ok, frame = self.capture.read()
+        if not ok:
+            return None  # End of video or unreadable frame
+
+        # Validate frame integrity
+        if frame is None or frame.size == 0:
+            return None
+
+        # Resize oversized frames
+        h, w = frame.shape[:2]
+        if w > self.max_width or h > self.max_height:
+            if self.auto_resize:
+                frame = self._resize_to_max(frame)
+            else:
+                raise ValueError("Frame exceeds maximum allowed size.")
+        self.frame_index += 1
+
+        return frame
 
 class VideoFrameAnalyser():
     def __init__(self, image_path=None):
@@ -12,6 +92,11 @@ class VideoFrameAnalyser():
 
         if image_path:
             self.load_and_set_properties(image_path)
+
+    def load_video_frame(self, frame):
+        if frame is None:
+            raise FileNotFoundError(f"Could not load image: ")
+        self.screen_height, self.screen_width = frame.shape[:2]
 
     def load_and_set_properties(self, path):
         img = cv2.imread(path)
@@ -421,11 +506,45 @@ class Avoider():
     def print_hyperparameters(self):
         print(f"clearance weight: {self.weight_clearance}, alignment weight: {self.weight_alignment}, learning rate: {self.learning_rate}")
 
+    def get_hyperparameters(self):
+        return f"clearance weight: {self.weight_clearance}, alignment weight: {self.weight_alignment}, learning rate: {self.learning_rate}"
+
 class Runner():
     def __init__(self):
         pass 
 
-    def analyse_optimal_trajectory(self, img_path, current_vector_3d):
+    def process_video(self, video_path, initial_vector_3d):
+        print("processing video capture")
+        reader = VideoReader()
+        reader.load_video(video_path)
+
+        frame_analyser = VideoFrameAnalyser()
+        detector = YOLOObstacleDetector()
+        drone = DroneState([0,0,0], initial_vector_3d)
+
+        frame = reader.progress_frame()
+        while frame is not None:
+            # Initialize analyser after getting first frame
+            frame_analyser.load_video_frame(frame)
+
+            obstacles = detector.detect(frame)
+            screen_width = frame_analyser.get_screen_width()
+            screen_height = frame_analyser.get_screen_height()
+            fov = frame_analyser.get_fov()
+
+            avoider = Avoider(drone, obstacles, screen_width, screen_height, fov)
+
+            avoider.calculate_optimal_trajectory()
+            avoider.set_optimal_trajectory
+
+            results =  {"frame_index": reader.frame_index, "previous trajectory": initial_vector_3d,"current trajectory": avoider.get_optimal_trajectory(), "obstacle_count": len(obstacles), "hyperparameters": avoider.get_hyperparameters}
+
+            initial_vector_3d = avoider.get_optimal_trajectory()
+
+            print(results)
+            print("")
+
+    def run_image_test(self, img_path, current_vector_3d):
         """This is a high level method that loads all the components of the system"""
         #Starting video frame analysis
         frame_analyser = VideoFrameAnalyser(img_path)
@@ -482,4 +601,3 @@ class Runner():
         cv2.imshow("Test Frame", frame)
         cv2.resizeWindow("Test Frame", 1280, 720)
         cv2.waitKey(0)
-
