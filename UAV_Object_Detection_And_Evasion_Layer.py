@@ -4,6 +4,7 @@ import math
 from ultralytics import YOLO
 import cv2
 import time
+import json
 
 class VideoReader():
     def __init__(self):
@@ -373,7 +374,7 @@ class DroneState():
         self.vel[2] += increment
 
 class Avoider():
-    def __init__(self, drone, obstacles, frame_width, frame_height, fov):
+    def __init__(self, drone, obstacles, frame_width, frame_height, fov, weight_alignment = 0.4, weight_clearance = 0.6):
         self.dist_threshold = 30
         self.drone = drone 
         self.obstacles = obstacles 
@@ -381,14 +382,15 @@ class Avoider():
         self.frame_height = frame_height
         self.fov = fov
 
-        self.weight_alignment = 0.4
-        self.weight_clearance = self.complement(self.weight_alignment)
+        self.weight_alignment = weight_alignment
+        self.weight_clearance = weight_clearance
         self.learning_rate = 0.02
 
         self.optimal_trajectory = None
 
-    def complement(self, p):
-        return 1.0 - p
+    def set_hyperparameters(self, hyperparameters_dict):
+        self.weight_alignment = hyperparameters_dict.get("weight_alignment")
+        self.weight_clearance = hyperparameters_dict.get("weight_clearance")
 
     def new_position_2D(self):
         point = self.drone.new_position()
@@ -509,12 +511,27 @@ class Avoider():
     def get_hyperparameters(self):
         return f"clearance weight: {self.weight_clearance}, alignment weight: {self.weight_alignment}, learning rate: {self.learning_rate}"
 
+    def hyperparameters_dict(self):
+        return {"weight_clearance": self.weight_clearance, "weight_alignment":self.weight_alignment}
+
+    @staticmethod
+    def from_dict(cls, data):
+        return cls(**data)
+
+    def save(self):
+        with open("hyperparameters.txt", "w") as f:
+            json.dump(self.hyperparameters_dict(), f, indent = 4)
+
+    def load(self):
+        with open("hyperparameters.txt", "r") as f:
+            data = json.load(f)
+            return Avoider.from_dict(data)
+
 class Runner():
     def __init__(self):
         pass 
 
     def process_video(self, video_path, initial_vector_3d):
-        print("processing video capture")
         reader = VideoReader()
         reader.load_video(video_path)
 
@@ -533,6 +550,8 @@ class Runner():
             fov = frame_analyser.get_fov()
 
             avoider = Avoider(drone, obstacles, screen_width, screen_height, fov)
+            hyperparameters = avoider.load()
+            avoider.set_hyperparameters(hyperparameters)
 
             avoider.calculate_optimal_trajectory()
             avoider.set_optimal_trajectory
@@ -568,7 +587,7 @@ class Runner():
                       (obs.bbox[2], obs.bbox[3]),
                       (255, 0, 0), 2)
         #Starting evasion system
-        avoider = Avoider(drone, obstacles, screen_width, screen_height, fov)
+        avoider = Avoider(drone, obstacles, screen_width, screen_height, fov) 
         # === Calculate actual optimal trajectory ===
         avoider.calculate_optimal_trajectory()
         # Apply new trajectory to the drone
