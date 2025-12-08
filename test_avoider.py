@@ -61,23 +61,35 @@ def test_obstacle1():
     runner = Runner()
     img_path = "obstacle1.jpg"
     current_vector_3d = np.array([209, 157, 100])
-    runner.analyse_optimal_trajectory(img_path, current_vector_3d)
+    runner.run_image_test(img_path, current_vector_3d)
 
 def test_obstacle2():
     print("\n=== Running Avoider Test 2 ===\n")
     runner = Runner()
     img_path = "obstacle2.jpg"
     current_vector_3d = np.array([1, 26, 202])
-    runner.analyse_optimal_trajectory(img_path, current_vector_3d)
+    runner.run_image_test(img_path, current_vector_3d)
 
 def test_obstacle3():
     print("\n=== Running Avoider Test 3 ===\n")
     runner = Runner()
     img_path = "obstacle3.jpg"
     current_vector_3d = np.array([1, 120, 67])
-    runner.analyse_optimal_trajectory(img_path, current_vector_3d)
+    runner.run_image_test(img_path, current_vector_3d)
+
+def test_obstacle4():
+    print("\n=== Running Avoider Test 3 ===\n")
+    runner = Runner()
+    img_path = "obstacle4.png"
+    current_vector_3d = np.array([1, 26, 202])
+    runner.run_image_test(img_path, current_vector_3d)
+
+def test_video():
+    print("=== Running Video Capture Test ===")
+    runner = Runner()
+    video_path = "rural_drone_footage.mp4"
+    current_vector_3d = np.array([1, 26, 202])
+    runner.process_video(video_path, current_vector_3d)
 
 if __name__ == "__main__":
-    test_obstacle1()
-    test_obstacle2()
-    test_obstacle3()
+    test_video()
