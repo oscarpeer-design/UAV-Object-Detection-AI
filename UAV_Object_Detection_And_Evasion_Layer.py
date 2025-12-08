@@ -36,6 +36,8 @@ class VideoReader():
                     f"Video resolution too large ({self.frame_width}x{self.frame_height}). "
                     f"Max allowed is {self.max_width}x{self.max_height}")
 
+        print("Successfully loaded video.")
+
     def adjust_frame_rate(self):
         """
         Adaptive frame skipping to match target FPS.
@@ -61,6 +63,7 @@ class VideoReader():
         return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
     def read_frame(self):
+        self.last_frame_time = time.time()
         if self.capture is None:
             raise RuntimeError("Video not loaded. Call load_video() first.")
 
@@ -283,9 +286,9 @@ class YOLOObstacleDetector:
         #Uses detection based on both object recognition and shape recognition
         shapes = self.detect_shapes(frame)
         obstacles = self.detect_real_world_obstacles(frame)
-        final_list_obstacles = shapes
-        for obs in obstacles:
-            final_list_obstacles.append(obs)
+        final_list_obstacles = obstacles
+        # for shape in shapes:
+        #     final_list_obstacles.append(shape)
         return final_list_obstacles
 
 class Vector():
@@ -514,18 +517,21 @@ class Avoider():
     def hyperparameters_dict(self):
         return {"weight_clearance": self.weight_clearance, "weight_alignment":self.weight_alignment}
 
-    @staticmethod
-    def from_dict(cls, data):
-        return cls(**data)
-
     def save(self):
-        with open("hyperparameters.txt", "w") as f:
-            json.dump(self.hyperparameters_dict(), f, indent = 4)
+        try:
+            with open("hyperparameters.txt", "w") as f:
+                json.dump(self.hyperparameters_dict(), f, indent = 4)
+        except:
+            raise Exception("An error occurred when writing to the JSON file.")
 
     def load(self):
-        with open("hyperparameters.txt", "r") as f:
-            data = json.load(f)
-            return Avoider.from_dict(data)
+        try:
+            with open("hyperparameters.txt", "r") as f:
+                data = json.load(f)
+                #print("Raw data: " + str(data)) #debugging output statement
+                return data
+        except:
+            raise Exception("An error occurred when reading from the JSON file.")
 
 class Runner():
     def __init__(self):
@@ -539,8 +545,10 @@ class Runner():
         detector = YOLOObstacleDetector()
         drone = DroneState([0,0,0], initial_vector_3d)
 
-        frame = reader.progress_frame()
-        while frame is not None:
+        frame = reader.read_frame()
+        frame_count = 1
+        max_frames = 20
+        while frame is not None and frame_count < max_frames:
             # Initialize analyser after getting first frame
             frame_analyser.load_video_frame(frame)
 
@@ -550,18 +558,21 @@ class Runner():
             fov = frame_analyser.get_fov()
 
             avoider = Avoider(drone, obstacles, screen_width, screen_height, fov)
+            avoider.save()
             hyperparameters = avoider.load()
             avoider.set_hyperparameters(hyperparameters)
 
             avoider.calculate_optimal_trajectory()
             avoider.set_optimal_trajectory
 
-            results =  {"frame_index": reader.frame_index, "previous trajectory": initial_vector_3d,"current trajectory": avoider.get_optimal_trajectory(), "obstacle_count": len(obstacles), "hyperparameters": avoider.get_hyperparameters}
+            results =  {"frame_count": frame_count, "previous trajectory": initial_vector_3d,"current trajectory": avoider.get_optimal_trajectory(), "obstacle_count": len(obstacles), "hyperparameters": avoider.get_hyperparameters()}
 
             initial_vector_3d = avoider.get_optimal_trajectory()
+            avoider.save() #save final result
 
             print(results)
             print("")
+            frame_count += 1
 
     def run_image_test(self, img_path, current_vector_3d):
         """This is a high level method that loads all the components of the system"""
